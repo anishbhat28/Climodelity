@@ -14,7 +14,7 @@ AUTORESEARCH_BUDGET = 10
 ALLOWED_DATA_EXTENSIONS  = {"csv"}
 ALLOWED_MODEL_EXTENSIONS = {"py"}
 
-st.set_page_config(page_title="Model Diagnostics", page_icon="📊", layout="centered")
+st.set_page_config(page_title="Climodelity", layout="centered")
 
 if "last_run_sig" not in st.session_state:
     st.session_state.last_run_sig = None
