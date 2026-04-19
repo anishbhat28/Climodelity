@@ -315,12 +315,18 @@ if run:
         # Contract shims — make the uploaded train.py produce predictions.csv
         # and read whatever filename it hardcoded by aliasing common names.
         import shutil as _shutil
-        for alias in ("combined_data.csv", "input_data.csv", "train_data.csv"):
-            _alias_path = project_root / alias
+        _train_src = train_path.read_text(encoding="utf-8")
+
+        # Alias data.csv to every CSV filename the uploaded train.py hardcodes
+        _csv_refs = set(re.findall(r"""['"]([^'"\s]+\.csv)['"]""", _train_src))
+        _csv_refs.update({"combined_data.csv", "input_data.csv", "train_data.csv"})
+        _csv_refs.discard("data.csv")
+        _csv_refs.discard("predictions.csv")
+        for alias in _csv_refs:
+            _alias_path = project_root / Path(alias).name
             if not _alias_path.exists():
                 _shutil.copy(data_path, _alias_path)
 
-        _train_src = train_path.read_text(encoding="utf-8")
         if "predictions.csv" not in _train_src:
             _train_src += """
 
