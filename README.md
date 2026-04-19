@@ -1,4 +1,4 @@
-# 🌊 Environmental ML Trust Lab — Gulf of Mexico
+# 🌊 DELULUGE - ML Lab 
 
 **A spatiotemporal atlas of where neural ocean surrogates fail, and why.**
 
