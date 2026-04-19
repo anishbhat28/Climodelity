@@ -49,14 +49,15 @@ def find_data_path() -> str | None:
 
 
 # ---------- Header ----------
-st.title("🌊 ML Trust Lab")
+st.title("ML Trust Lab")
 
 
 data_path = find_data_path()
 if data_path is None:
     st.warning(
-        "No `predictions.csv` or `data.csv` in the project root. Upload on the **Upload** page first — "
-        "the frontend will save your upload, run your train.py to produce predictions.csv, then kick off autoresearch."
+        "No `predictions.csv` or `data.csv` in the project root. Start from the **Upload** page — "
+        "the pipeline saves the uploaded files, executes the training script to emit "
+        "`predictions.csv`, then invokes the autoresearch loop."
     )
     st.stop()
 
@@ -250,9 +251,10 @@ st.header("Validated failure modes (autoresearch loop)")
 
 if not os.path.exists(FINDINGS_PATH):
     st.info(
-        "No findings.json yet. Run `python autoresearch.py --data data.csv` to populate this section. "
-        "The loop will propose regime hypotheses, test them on a discovery split, and validate the "
-        "survivors on a held-out split with Bonferroni correction."
+        "No `outputs/findings.json` yet. Run `python autoresearch.py --data predictions.csv` to populate "
+        "this section. The loop proposes regime hypotheses against `predictions.csv`, tests them on a "
+        "discovery split via Welch's t-test, and validates the survivors on a held-out split with "
+        "Bonferroni correction."
     )
 else:
     with open(FINDINGS_PATH) as _f:
@@ -266,13 +268,15 @@ else:
 
     st.markdown(
         f"""
-        The autoresearch loop proposed **{n_total} regime hypotheses**, tested them on a discovery
-        split, and validated the survivors on a held-out split with Bonferroni correction at
-        α = {alpha:.4f}. **{n_validated} passed** validation; **{n_rejected} were correctly rejected**
-        when their effect failed to generalize.
+        The autoresearch loop proposed **{n_total} regime hypotheses** over the regime fields extracted
+        from `predictions.csv` (target, prediction, |error|, residual sign, and each numeric feature),
+        tested each with Welch's t-test on a discovery split, then re-tested the survivors on a held-out
+        validation split with Bonferroni correction at α = {alpha:.4f}. **{n_validated} passed** validation;
+        **{n_rejected} were correctly rejected** when the inside-vs-outside error gap failed to generalize.
 
-        Every finding below carries a pair of 8-character receipt IDs pointing to the tool calls
-        that computed each number. The full execution trace is in `outputs/findings.json`.
+        Every finding below carries a pair of 8-character receipt IDs linking each reported number back
+        to the exact tool call that computed it. The full execution trace is persisted to
+        `outputs/findings.json`.
         """
     )
 
@@ -331,15 +335,28 @@ else:
 st.header("Method notes")
 st.markdown(
     """
+    **Pipeline.** Upload page saves the training script and tabular data, performs automated
+    preprocessing on the script + data features to emit `program.md`, then executes the training
+    script which must write `predictions.csv` (columns `target`, `prediction`, plus any numeric
+    feature columns). The autoresearch loop consumes `predictions.csv` and writes
+    `outputs/findings.json`; this dashboard renders both.
+
     **Discovery / validation split.** Rows are randomly permuted with a fixed seed and split 70/30.
-    The agent can only query the discovery split; every candidate is re-tested on the held-out
-    validation split with Bonferroni correction to control the family-wise error rate.
+    The agent only sees the discovery split during hypothesis generation; every candidate is re-tested
+    on the held-out validation split with Bonferroni correction to control the family-wise error rate.
 
-    **Regime language.** Generic tabular: target/prediction percentiles, absolute-error percentiles,
-    residual sign (over- vs under-prediction), and feature-column percentiles/thresholds. The agent
-    enumerates these and tests Welch's t-test on inside-vs-outside absolute error.
+    **Regime language.** Generic tabular. Five always-present fields — `target`, `prediction`,
+    `abs_error`, `residual`, `residual_sign` — plus one `feature::<col>` per numeric column in
+    `predictions.csv`. Comparators: `percentile_gt` / `percentile_lt` (value is 0–100) and
+    `gt` / `lt` / `eq` (value is a raw threshold).
 
-    **Receipts.** Every finding links back to its tool-call id, so no reported number is
-    unchallengeable — the full execution trace is persisted to `outputs/findings.json`.
+    **Statistical test.** Welch's t-test on absolute error, inside vs. outside the regime. Unequal-
+    variance version, because percentile-based splits systematically produce heteroscedastic groups.
+    An agent-proposed regime is promoted to a candidate iff the discovery pass yields
+    `error_ratio > 1.2` and `p < 0.001`; Bonferroni correction on validation gatekeeps what gets
+    reported above.
+
+    **Receipts.** Every finding links back to the tool-call id that computed each number, so any
+    reported statistic can be traced back to the exact invocation in the execution log.
     """
 )

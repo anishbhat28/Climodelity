@@ -213,10 +213,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 # ── Nav ──
 st.markdown("""
 <div class="nav">
-  <div class="nav-left">
-    <div class="nav-icon">📊</div>
-    <span class="nav-title">Model Diagnostics</span>
-  </div>
+  <div class="nav-left"></div>
   <span class="nav-badge">Research Tool</span>
 </div>
 """, unsafe_allow_html=True)
@@ -224,7 +221,6 @@ st.markdown("""
 # ── Hero ──
 st.markdown("""
 <div class="hero">
-  <div class="hero-eyebrow">AI-Powered Analysis</div>
   <h1>Interpret Your <span>Model Output</span></h1>
   <p>Upload a trained model and a dataset, then describe what you want to know.</p>
 </div>
@@ -233,13 +229,6 @@ st.markdown("""
 # ── Card ──
 st.markdown("""
 <div class="card">
-  <div class="card-header">
-    <div class="card-header-icon">🗂️</div>
-    <div>
-      <h2>New Session</h2>
-      <p>Complete all three steps to run your analysis</p>
-    </div>
-  </div>
   <div class="card-body">
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-label">Training Script</div></div>
@@ -261,7 +250,7 @@ datafile = st.file_uploader("Data file", type=list(ALLOWED_DATA_EXTENSIONS), key
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="field-label">Prompt <span style="color:#e08898">*</span></div>', unsafe_allow_html=True)
-st.markdown('<div class="field-hint">Describe what you want GPT to analyze or explain about the model output.</div>', unsafe_allow_html=True)
+st.markdown('<div class="field-hint">Describe what you want analyzed or explained about the model output.</div>', unsafe_allow_html=True)
 prompt = st.text_area(
     "Prompt",
     placeholder="e.g. What are the most significant predictors in this model, and how do they interact with each other?",
@@ -324,8 +313,9 @@ if run:
         _csv_refs.discard("predictions.csv")
         for alias in _csv_refs:
             _alias_path = project_root / Path(alias).name
-            if not _alias_path.exists():
-                _shutil.copy(data_path, _alias_path)
+            if _alias_path.resolve() == data_path.resolve():
+                continue
+            _shutil.copy(data_path, _alias_path)
 
         if "predictions.csv" not in _train_src:
             _train_src += """
@@ -333,31 +323,51 @@ if run:
 # --- auto-injected predictions.csv writer (contract shim) ---
 try:
     import pandas as _pd
+    import numpy as _np
     from pathlib import Path as _Path
     _g = globals()
-    _src_df = _g.get('df') if isinstance(_g.get('df'), _pd.DataFrame) else None
-    _feats = _g.get('features')
-    _preds_all = None
-    for _k in ('rf_preds_all', 'lr_preds_all', 'preds_all', 'predictions', 'y_pred'):
-        _v = _g.get(_k)
-        if _v is not None:
-            _preds_all = _v
-            break
-    _y_all = _g.get('y_all')
-    if _y_all is None and _src_df is not None:
-        for _k in ('sea_level_mm', 'target', 'y'):
-            if _k in _src_df.columns:
-                _y_all = _src_df[_k]
+
+    def _is_1d_num_array(v):
+        try:
+            a = _np.asarray(v)
+            return a.ndim == 1 and a.size > 0 and _np.issubdtype(a.dtype, _np.number)
+        except Exception:
+            return False
+
+    _arrays = {k: _np.asarray(v) for k, v in list(_g.items())
+               if not k.startswith('_') and _is_1d_num_array(v)}
+    _target_keys = [k for k in _arrays if any(s in k.lower() for s in ('y_test', 'target', 'y_true', 'y_val'))]
+    _pred_keys = [k for k in _arrays if 'pred' in k.lower() and 'lag' not in k.lower()]
+
+    _t_arr, _p_arr, _picked_t, _picked_p = None, None, None, None
+    for _tk in _target_keys:
+        for _pk in _pred_keys:
+            if len(_arrays[_tk]) == len(_arrays[_pk]):
+                _t_arr, _p_arr, _picked_t, _picked_p = _arrays[_tk], _arrays[_pk], _tk, _pk
                 break
-    if _src_df is not None and _feats is not None and _preds_all is not None and _y_all is not None:
-        _keep = [c for c in (['year'] + list(_feats)) if c in _src_df.columns]
-        _out = _src_df[_keep].copy()
-        _out['target'] = _y_all.values if hasattr(_y_all, 'values') else _y_all
-        _out['prediction'] = _preds_all
+        if _t_arr is not None:
+            break
+
+    if _t_arr is not None:
+        _out = _pd.DataFrame({'target': _t_arr, 'prediction': _p_arr})
+        # Pull matching feature/context columns from a test DataFrame if present
+        for _candidate_name in ('test', 'test_df', 'df_test', 'X_test_df', 'val', 'val_df'):
+            _cand = _g.get(_candidate_name)
+            if isinstance(_cand, _pd.DataFrame) and len(_cand) == len(_t_arr):
+                for _c in _cand.columns:
+                    if _c in _out.columns:
+                        continue
+                    try:
+                        _col_arr = _cand[_c].to_numpy()
+                        if _np.issubdtype(_col_arr.dtype, _np.number):
+                            _out[_c] = _col_arr
+                    except Exception:
+                        pass
+                break
         _out.to_csv(_Path(__file__).parent / 'predictions.csv', index=False)
-        print(f"auto-injected: wrote predictions.csv ({len(_out)} rows)")
+        print(f"auto-injected: wrote predictions.csv ({len(_out)} rows, cols: {list(_out.columns)}) from {_picked_t}/{_picked_p}")
     else:
-        print("auto-inject skipped: could not locate df/features/preds/y_all in globals")
+        print(f"auto-inject skipped: no matching target/prediction arrays (targets={_target_keys}, preds={_pred_keys})")
 except Exception as _e:
     print(f"auto-inject skipped: {_e}")
 """
@@ -371,7 +381,7 @@ except Exception as _e:
             data_features = extract_data_features(data_path)
             bar.progress(22, text="Building prompt…")
             prompt_text = build_prompt(train_context, prompt.strip(), data_features)
-            bar.progress(30, text="Calling GPT API — this may take a moment…")
+            bar.progress(30, text="Running automated preprocessing — this may take a moment…")
             _client = _OpenAI()
             response = _client.responses.create(model="gpt-5.4", input=prompt_text)
             program_md = response.output_text.strip()
@@ -384,21 +394,14 @@ except Exception as _e:
                 program_md = "\n".join(lines).strip()
             bar.progress(35, text="Writing program.md…")
             output_path.write_text(program_md, encoding="utf-8")
-            bar.progress(38, text="program.md saved. Running your training script…")
+            bar.progress(38, text="Preprocessing complete. Running the training script…")
 
-            st.markdown("""
-            <div class="resp-success">
-              <div class="resp-success-header">✓ program.md saved — executing train.py</div>
-            </div>""", unsafe_allow_html=True)
-
-            log_box = st.empty()
             log_lines: list[str] = []
 
             def push_log(line: str):
                 log_lines.append(line)
-                if len(log_lines) > 25:
-                    del log_lines[: len(log_lines) - 25]
-                log_box.code("\n".join(log_lines), language=None)
+                if len(log_lines) > 200:
+                    del log_lines[: len(log_lines) - 200]
 
             predictions_path = project_root / "predictions.csv"
             if predictions_path.exists():
@@ -418,10 +421,14 @@ except Exception as _e:
             train_proc.wait()
 
             if train_proc.returncode != 0:
+                print("=" * 70, file=sys.stderr, flush=True)
+                print(f"[train.py FAILED exit={train_proc.returncode}] captured output:", file=sys.stderr, flush=True)
+                print("\n".join(log_lines), file=sys.stderr, flush=True)
+                print("=" * 70, file=sys.stderr, flush=True)
                 st.markdown(f"""
                 <div class="resp-error">
                   <div class="resp-error-header">train.py failed (exit {train_proc.returncode})</div>
-                  <div class="resp-body">See log above. Contract: train.py must read data.csv and write predictions.csv with columns target + prediction.</div>
+                  <div class="resp-body">Contract: train.py must read data.csv and write predictions.csv with columns target + prediction. Details dumped to the streamlit terminal.</div>
                 </div>""", unsafe_allow_html=True)
                 st.stop()
 
@@ -471,10 +478,14 @@ except Exception as _e:
             proc.wait()
 
             if proc.returncode != 0:
+                print("=" * 70, file=sys.stderr, flush=True)
+                print(f"[autoresearch FAILED exit={proc.returncode}] captured output:", file=sys.stderr, flush=True)
+                print("\n".join(log_lines), file=sys.stderr, flush=True)
+                print("=" * 70, file=sys.stderr, flush=True)
                 st.markdown(f"""
                 <div class="resp-error">
                   <div class="resp-error-header">Autoresearch failed (exit {proc.returncode})</div>
-                  <div class="resp-body">See log above.</div>
+                  <div class="resp-body">Details dumped to the streamlit terminal — scroll there for the traceback.</div>
                 </div>""", unsafe_allow_html=True)
             else:
                 bar.progress(100, text="Complete! Opening dashboard…")
@@ -488,4 +499,4 @@ except Exception as _e:
               <div class="resp-body">{e}</div>
             </div>""", unsafe_allow_html=True)
 
-    st.markdown('<div class="site-footer">Model Diagnostics &middot; Research Tool &middot; 2026</div>', unsafe_allow_html=True)
+    st.markdown('<div class="site-footer">Research Tool &middot; 2026</div>', unsafe_allow_html=True)
