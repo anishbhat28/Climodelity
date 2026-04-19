@@ -11,7 +11,7 @@ from openai import OpenAI as _OpenAI
 
 AUTORESEARCH_BUDGET = 10
 
-ALLOWED_DATA_EXTENSIONS  = {"csv", "json", "xlsx", "txt", "parquet"}
+ALLOWED_DATA_EXTENSIONS  = {"csv"}
 ALLOWED_MODEL_EXTENSIONS = {"py"}
 
 st.set_page_config(page_title="Model Diagnostics", page_icon="📊", layout="centered")
@@ -254,7 +254,7 @@ modelfile = st.file_uploader("Training script", type=list(ALLOWED_MODEL_EXTENSIO
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="field-label">Data File <span style="color:#e08898">*</span></div>', unsafe_allow_html=True)
-st.markdown('<div class="field-hint">Accepted: CSV · JSON · XLSX · TXT · Parquet — up to 1 GB</div>', unsafe_allow_html=True)
+st.markdown('<div class="field-hint">Tabular CSV with target + prediction columns, plus any numeric feature columns.</div>', unsafe_allow_html=True)
 datafile = st.file_uploader("Data file", type=list(ALLOWED_DATA_EXTENSIONS), key="data")
 
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
@@ -349,7 +349,11 @@ if run:
                 log_box.code("\n".join(log_lines), language=None)
 
             proc = subprocess.Popen(
-                [sys.executable, "autoresearch.py"],
+                [
+                    sys.executable, "autoresearch.py",
+                    "--data", str(data_path),
+                    "--prompt", prompt.strip(),
+                ],
                 cwd=str(project_root),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

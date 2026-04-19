@@ -10,3 +10,8 @@ __pycache__/
 data/processed/
 outputs/*.npz
 checkpoints/*.pt
+
+# Runtime artifacts from the upload pipeline (app.py overwrites these on run)
+/data.csv
+/program.md
+/uploads/
