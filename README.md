@@ -1,116 +1,133 @@
-# 🌊 DELULUGE - ML Lab 
+# 🌊 Climodelity
 
-**A spatiotemporal atlas of where neural ocean surrogates fail, and why.**
+**An ML trust lab for tabular models — surface where your model fails, and why.**
 
-Built for DataHacks 2026. Uses the Scripps Institution of Oceanography
-Gulf of Mexico sea surface height (SSH) dataset.
-
----
-
-## The problem
-
-Operational ocean forecasting centers (NOAA, Mercator Ocean, ECMWF) are
-migrating from expensive numerical simulations to fast ML surrogates. The
-blocker to deployment isn't accuracy — it's **silent failure**. A forecaster
-cannot stake evacuation decisions, storm-surge warnings, or search-and-rescue
-on a neural network that might be confidently wrong in ways nobody can predict.
-
-This project addresses that bottleneck. Not by making the neural net better —
-by telling the forecaster **where and when to trust it**, tied to the physical
-ocean regimes that cause the failures.
+Climodelity takes a trained model and the data it was evaluated on, and runs
+a grounded autoresearch loop that proposes, tests, and validates hypotheses
+about regimes of systematic failure. Every reported finding is gated by a
+held-out split and a Bonferroni-corrected Welch's t-test, and every number
+on the dashboard traces back to the exact tool call that produced it.
 
 ---
 
-## Headline result
+## What the pipeline does
 
-| Metric | Value | Notes |
-|---|---|---|
-| Model RMSE (test) | **4.0 mm** | Ensemble mean vs. Scripps numerical simulation, 7.9 test years |
-| Persistence RMSE | 10.3 mm | Baseline: predict tomorrow = today |
-| Skill over persistence | **2.6×** | The ensemble actually learns dynamics |
-| Mean disagreement | 3.1 mm | Ensemble standard deviation — the trust signal |
-| Pearson r (disagreement vs error) | **0.XX** | Disagreement is a genuine error predictor |
-
-Where the ensemble disagrees, it is also more likely to be wrong. The
-disagreement-error correlation is strongest in **dynamically active regions**
-(high eddy kinetic energy, Loop Current intrusion zones) — exactly the regions
-a forecaster needs to know not to trust a fast ML prediction.
-
----
-
-## What you get
-
-An interactive Streamlit app that lets you:
-
-1. **Scrub through time** across 2,866 held-out test days (simulation days 11,507–14,372)
-2. **See four synchronized panels**: ground-truth SSH, ensemble-mean prediction,
-   ensemble disagreement (trust field), absolute error
-3. **Verify the scientific claim** by eye: regions where disagreement lights up
-   should coincide with regions where error lights up
-4. **See the disagreement→error correlation** across the whole test set, colored
-   by physical regime
-
-The app opens on the pre-identified "money-shot" timestep — the single most
-dramatic example where the trust field correctly flagged a high-error event.
+1. **Upload** a training script, a tabular CSV, and a natural-language prompt.
+2. **Preprocess** — the script and data features are summarized into a
+   `program.md` specification (an instruction set downstream agents can use
+   to iterate on the training code).
+3. **Train** — your script is executed to produce `predictions.csv`
+   (`target`, `prediction`, plus any numeric feature columns).
+4. **Autoresearch** — the loop enumerates regime hypotheses over the
+   `predictions.csv` fields, tests each on a discovery split, and validates
+   the survivors on a held-out split with Bonferroni correction.
+5. **Dashboard** — RMSE / MAE, predictions-vs-targets, error and residual
+   distributions, and a ranked, receipted panel of validated failure modes.
 
 ---
 
-## Tracks
+## Setup
 
-Submitted to **ML/AI** and **Data Analytics**, using the required **Scripps** dataset.
+Requires Python 3.13 and macOS/Linux. On macOS, `libomp` is needed if your
+training script uses XGBoost.
 
-- **ML/AI framing:** neural surrogate ensemble with calibrated uncertainty,
-  plus a research-flavored analysis of regime-dependent failure modes.
-- **Data Analytics framing:** interactive atlas revealing how ML ocean models
-  break down, with statistical analysis tying failures to physical regimes
-  derivable from the data alone.
+```bash
+# clone
+git clone https://github.com/anishbhat28/DELULUGE.git climodelity
+cd climodelity
+
+# env
+python3 -m venv env
+source env/bin/activate
+
+# core deps
+pip install streamlit pandas numpy scipy matplotlib cmocean \
+            scikit-learn google-genai openai joblib werkzeug
+
+# macOS-only, if your train.py uses xgboost
+brew install libomp
+
+# model-agnostic extras you may want
+pip install xgboost tensorflow torch
+```
+
+Set API keys in the shell **before** launching Streamlit so subprocesses
+inherit them:
+
+```bash
+export GEMINI_API_KEY='your-gemini-key'      # for the autoresearch loop
+export OPENAI_API_KEY='your-openai-key'      # for program.md generation
+```
+
+Launch the app:
+
+```bash
+streamlit run app.py
+```
+
+---
+
+## Training-script contract
+
+The uploaded `train.py` is executed with `python train.py` after the data is
+saved as `data.csv` in the project root. It must:
+
+1. **Read** `data.csv` (or any hardcoded CSV name — Climodelity auto-aliases
+   common names so you rarely need to change your code).
+2. **Write** `predictions.csv` in the project root with at minimum the
+   columns `target` and `prediction`. Any additional numeric columns are
+   picked up automatically as regime-sliceable features.
+
+If your script doesn't write `predictions.csv`, Climodelity auto-injects a
+best-effort writer that introspects globals for common names like `y_test` /
+`*_preds` and a `test` / `test_df` DataFrame.
+
+---
+
+## Dataset
+
+<!-- Fill in details about your dataset here: source, shape, columns,
+     preprocessing notes, licensing, anything a future user should know
+     before uploading it. -->
+
+_TODO: dataset description._
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Streamlit UI (app.py)                                  │
-│  Headline · Atlas · Scatter · Methodology               │
-├─────────────────────────────────────────────────────────┤
-│  Domain-specific analysis                                │
-│  Regime indicators: EKE, Okubo-Weiss, Loop Current      │
-├─────────────────────────────────────────────────────────┤
-│  Ensemble analysis                                       │
-│  Per-pixel per-timestep error and disagreement fields   │
-├─────────────────────────────────────────────────────────┤
-│  Model ensemble (5 U-Nets, varied width/depth/seed)     │
-│  Predict SSH(t+1) from SSH(t−6 … t)                     │
-├─────────────────────────────────────────────────────────┤
-│  Dataset + dataloader (sliding windows, masked loss)    │
-├─────────────────────────────────────────────────────────┤
-│  Preprocessing (xarray, numpy)                           │
-│  Loop Current subdomain, temporal splits, normalization │
-├─────────────────────────────────────────────────────────┤
-│  Scripps Gulf of Mexico SSH simulation (40 years)       │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## Setup and reproduction
-
-```bash
-# Environment
-python3 -m venv env
-source env/bin/activate
-pip install torch xarray netcdf4 streamlit matplotlib cmocean numpy
-
-# Put the Scripps .nc file at ~/Downloads/run2_clim_v2_ssh.nc, then:
-python preprocess.py          # ~1 min  — extracts Loop Current subdomain
-python baseline_check.py      # ~10 sec — verifies persistence baseline
-python train_ensemble.py      # ~40 min on M4 Pro MPS — trains 5 U-Nets
-python regimes.py             # ~30 sec — physical regime indicators
-python find_money_shot.py     # ~5 sec  — picks the demo timestep
-
-# Launch
-python -m streamlit run app.py
+┌───────────────────────────────────────────────────────────┐
+│  Streamlit entry  (app.py) — upload page                   │
+│    • training script + CSV + prompt                        │
+│    • auto-patches hardcoded CSV filenames                  │
+│    • injects predictions.csv writer if missing             │
+├───────────────────────────────────────────────────────────┤
+│  Automated preprocessing  (automated_preprocessing.py)     │
+│    • AST-extracts training-loop context from train.py      │
+│    • pulls data features from the CSV                      │
+│    • emits program.md spec                                 │
+├───────────────────────────────────────────────────────────┤
+│  Training subprocess                                       │
+│    • runs your train.py verbatim                           │
+│    • expects predictions.csv on disk                       │
+├───────────────────────────────────────────────────────────┤
+│  Regime extraction  (rmse_regimes.py)                      │
+│    • target / prediction / abs_error / residual /          │
+│      residual_sign + feature::<col> for each numeric col   │
+├───────────────────────────────────────────────────────────┤
+│  Autoresearch loop  (autoresearch.py)                      │
+│    • agent proposes regime hypotheses within typed tool    │
+│    • 70/30 discovery/validation split (fixed seed)         │
+│    • Welch's t-test per hypothesis                         │
+│    • Bonferroni correction on validation                   │
+│    • writes outputs/findings.json with receipts            │
+├───────────────────────────────────────────────────────────┤
+│  Dashboard  (pages/dashboard.py)                           │
+│    • headline metrics · scatter · error + residual hists   │
+│    • validated / rejected failure-mode panels              │
+│    • legacy SSH atlas (rendered if the .npz fields exist)  │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -118,72 +135,57 @@ python -m streamlit run app.py
 ## File layout
 
 ```
-floodbreak/
+climodelity/
 ├── README.md                       # you are here
-├── app.py                          # Streamlit UI
-├── preprocess.py                   # raw .nc → train/val/test .npz
-├── dataset.py                      # PyTorch sliding-window dataset
-├── models.py                       # small U-Net (parameterized width/depth)
-├── train.py                        # single-model training loop
-├── train_ensemble.py               # train 5 models, save ensemble predictions
-├── baseline_check.py               # persistence baseline diagnostic
-├── regimes.py                      # physical regime indicators from SSH
-├── find_money_shot.py              # pick best demo timestep
-├── data/
-│   └── processed/splits.npz        # preprocessed tensors
-├── checkpoints/                    # trained model weights
-├── outputs/
-│   ├── test_predictions.npz        # ensemble predictions + error fields
-│   ├── test_regimes.npz            # physical regime fields
-│   └── money_shot.json             # selected demo timestep
-└── docs/
-    └── methodology.md              # detailed writeup
+├── app.py                          # upload page
+├── main.py                         # multipage navigation entry
+├── pages/
+│   └── dashboard.py                # results dashboard
+├── automated_preprocessing.py      # train.py AST + data-feature extraction
+├── autoresearch.py                 # hypothesis generation + validation loop
+├── rmse_regimes.py                 # generic tabular regime extractor
+├── train.py                        # overwritten by uploads at runtime
+├── predictions.csv                 # written by train.py (runtime artifact)
+├── program.md                      # generated spec (runtime artifact)
+└── outputs/
+    └── findings.json               # autoresearch execution trace + results
 ```
 
 ---
 
 ## Method summary
 
-**Data.** 40-year numerical simulation of Gulf of Mexico SSH from Scripps,
-0.05° resolution, daily snapshots (14,373 timesteps). Deterministic run with
-constant boundary forcing — "ground truth" is well-defined since we're
-training an ML surrogate to emulate a specific numerical model.
+**Discovery / validation split.** Rows are permuted with a fixed seed and
+split 70/30. The agent only sees the discovery split during hypothesis
+generation; every surviving candidate is re-tested on the held-out
+validation split with Bonferroni correction to control the family-wise
+error rate.
 
-**Spatial domain.** 22°N–28°N, 92°W–84°W, covering the Loop Current and its
-shed eddies. 120 × 146 pixels, ~0.8% land.
+**Regime language.** Generic tabular. Always-present fields — `target`,
+`prediction`, `abs_error`, `residual`, `residual_sign` — plus one
+`feature::<col>` per numeric column in `predictions.csv`. Comparators:
+`percentile_gt` / `percentile_lt` (value is 0–100) and `gt` / `lt` / `eq`
+(value is a raw threshold).
 
-**Temporal splits.** Train: days 0–9,999 (27.4 yr). Val: 10,000–11,499 (4.1 yr).
-Test: 11,500–14,372 (7.9 yr). Strictly causal — no future data leaks into training.
+**Statistical test.** Welch's t-test on absolute error inside vs. outside
+the regime. Unequal-variance because percentile-based splits systematically
+produce heteroscedastic groups. A discovery result is promoted to a
+candidate iff `error_ratio > 1.2` and `p < 0.001`.
 
-**Models.** Five U-Nets varying base width (24–48), depth (2–4), and random seed.
-Parameter counts 120k–4.3M. Input: 7 days of SSH history as channels. Output:
-predicted SSH at t+1.
-
-**Training.** Masked MSE loss (land excluded). AdamW with cosine LR schedule,
-6 epochs per model, Apple M4 Pro MPS backend. ~80 seconds per epoch.
-
-**Analysis.** Per-pixel per-timestep error and disagreement fields computed
-on test set. Physical regime indicators (eddy kinetic energy, Okubo-Weiss
-parameter, Loop Current northward extent, anomaly magnitude) computed directly
-from the SSH field — no external data needed.
-
-See `docs/methodology.md` for full details.
+**Receipts.** Every finding links to the tool-call id that computed each
+number. `outputs/findings.json` contains the full execution trace.
 
 ---
 
-## Attribution and honest framing
+## Attribution
 
-This project does not claim to save lives. It demonstrates a tool that, deployed
-in an operational forecasting pipeline, gives forecasters information they need
-to decide when to trust a fast ML prediction versus fall back to slower physical
-models. The impact is in the chain of decisions downstream, not in this artifact.
+The autoresearch loop in this project is directly inspired by **Andrej
+Karpathy's autoresearch concept** — the framing of a constrained LLM agent
+proposing and testing domain-scoped hypotheses under a budget, with
+statistical gatekeeping rather than raw-token introspection. Climodelity's
+specific contributions are the typed regime language for tabular ML
+failure modes, the train.py contract for closing the loop from raw data to
+receipted findings, and the Bonferroni-on-validation gate.
 
-The autoresearch layer (in development) is inspired by public work on LLM-driven
-autonomous research — Karpathy's autoresearch concept, Sakana AI's AI Scientist,
-Anthropic's agentic research patterns. Our specific contributions are:
-(1) a physical-oceanography hypothesis language with domain-specific tools;
-(2) information-gain-guided hypothesis selection under fixed budget;
-(3) held-out temporal validation and Bonferroni correction on every reported
-finding. All agent code is written from scratch; no external agent framework is used.
-
-Built in 8 hours for DataHacks 2026.
+All agent code is written from scratch; no external agent framework is
+used.
