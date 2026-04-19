@@ -213,7 +213,9 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 # ── Nav ──
 st.markdown("""
 <div class="nav">
-  <div class="nav-left"></div>
+  <div class="nav-left">
+    <span class="nav-title">Climodelity</span>
+  </div>
   <span class="nav-badge">Research Tool</span>
 </div>
 """, unsafe_allow_html=True)
