@@ -1,9 +1,15 @@
+import re
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import streamlit as st
 
 from automated_preprocessing import extract_train_context, extract_data_features, build_prompt
 from openai import OpenAI as _OpenAI
+
+AUTORESEARCH_BUDGET = 10
 
 ALLOWED_DATA_EXTENSIONS  = {"csv", "json", "xlsx", "txt", "parquet"}
 ALLOWED_MODEL_EXTENSIONS = {"py"}
@@ -307,13 +313,13 @@ if run:
 
         try:
             bar = st.progress(0, text="Saving uploaded files…")
-            bar.progress(15, text="Parsing training script…")
+            bar.progress(8, text="Parsing training script…")
             train_context = extract_train_context(train_path)
-            bar.progress(38, text="Extracting data features…")
+            bar.progress(15, text="Extracting data features…")
             data_features = extract_data_features(data_path)
-            bar.progress(58, text="Building prompt…")
+            bar.progress(22, text="Building prompt…")
             prompt_text = build_prompt(train_context, prompt.strip(), data_features)
-            bar.progress(72, text="Calling GPT API — this may take a moment…")
+            bar.progress(30, text="Calling GPT API — this may take a moment…")
             _client = _OpenAI()
             response = _client.responses.create(model="gpt-5.4", input=prompt_text)
             program_md = response.output_text.strip()
@@ -324,14 +330,66 @@ if run:
                 if lines and lines[-1].startswith("```"):
                     lines = lines[:-1]
                 program_md = "\n".join(lines).strip()
-            bar.progress(94, text="Writing output…")
+            bar.progress(45, text="Writing program.md…")
             output_path.write_text(program_md, encoding="utf-8")
-            bar.progress(100, text="Complete!")
-            st.session_state.last_run_sig = current_sig
+            bar.progress(50, text="program.md saved. Launching deep research…")
+
             st.markdown("""
             <div class="resp-success">
-              <div class="resp-success-header">✓ program.md saved</div>
+              <div class="resp-success-header">✓ program.md saved — running autoresearch</div>
             </div>""", unsafe_allow_html=True)
+
+            log_box = st.empty()
+            log_lines: list[str] = []
+
+            def push_log(line: str):
+                log_lines.append(line)
+                if len(log_lines) > 25:
+                    del log_lines[: len(log_lines) - 25]
+                log_box.code("\n".join(log_lines), language=None)
+
+            proc = subprocess.Popen(
+                [sys.executable, "autoresearch.py"],
+                cwd=str(project_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            turn_re = re.compile(r"\[Agent turn (\d+)\]")
+            assert proc.stdout is not None
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                push_log(line)
+                if "Loaded data" in line:
+                    bar.progress(55, text="Deep research: data loaded…")
+                elif "DISCOVERY PHASE" in line:
+                    bar.progress(58, text="Deep research: discovery phase…")
+                elif (m := turn_re.search(line)):
+                    turn = int(m.group(1))
+                    pct = min(58 + int((turn / AUTORESEARCH_BUDGET) * 30), 88)
+                    bar.progress(pct, text=f"Deep research: hypothesis {turn + 1}/{AUTORESEARCH_BUDGET}…")
+                elif "VALIDATION PHASE" in line:
+                    bar.progress(90, text="Deep research: validating on held-out split…")
+                elif "FINAL FINDINGS" in line:
+                    bar.progress(95, text="Deep research: compiling findings…")
+                elif "Saved outputs/findings.json" in line:
+                    bar.progress(98, text="Deep research: findings saved.")
+
+            proc.wait()
+
+            if proc.returncode != 0:
+                st.markdown(f"""
+                <div class="resp-error">
+                  <div class="resp-error-header">Autoresearch failed (exit {proc.returncode})</div>
+                  <div class="resp-body">See log above.</div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                bar.progress(100, text="Complete! Opening dashboard…")
+                st.session_state.last_run_sig = current_sig
+                time.sleep(0.6)
+                st.switch_page("dashboard.py")
         except Exception as e:
             st.markdown(f"""
             <div class="resp-error">
