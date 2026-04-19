@@ -23,7 +23,7 @@ st.set_page_config(
 )
 
 
-DATA_CANDIDATES = ["data.csv"]
+DATA_CANDIDATES = ["predictions.csv", "data.csv"]
 FINDINGS_PATH = "outputs/findings.json"
 
 
@@ -46,8 +46,8 @@ st.title("🌊 ML Trust Lab")
 data_path = find_data_path()
 if data_path is None:
     st.warning(
-        "No `data.csv` in the project root. Upload a dataset on the **Upload** page first "
-        "(the frontend saves the uploaded file as `data.csv` and kicks off autoresearch)."
+        "No `predictions.csv` or `data.csv` in the project root. Upload on the **Upload** page first — "
+        "the frontend will save your upload, run your train.py to produce predictions.csv, then kick off autoresearch."
     )
     st.stop()
 

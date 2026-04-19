@@ -248,13 +248,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="field-label">Training Script <span style="color:#e08898">*</span></div>', unsafe_allow_html=True)
-st.markdown('<div class="field-hint">Upload your train.py (or equivalent Python training script)</div>', unsafe_allow_html=True)
+st.markdown('<div class="field-hint">Your train.py will be executed with <code>python train.py</code>. It must read <code>data.csv</code> and write <code>predictions.csv</code> with columns <code>target</code> + <code>prediction</code> (plus optional numeric feature columns).</div>', unsafe_allow_html=True)
 modelfile = st.file_uploader("Training script", type=list(ALLOWED_MODEL_EXTENSIONS), key="model")
 
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="field-label">Data File <span style="color:#e08898">*</span></div>', unsafe_allow_html=True)
-st.markdown('<div class="field-hint">Tabular CSV with target + prediction columns, plus any numeric feature columns.</div>', unsafe_allow_html=True)
+st.markdown('<div class="field-hint">Tabular CSV. Your train.py consumes this and produces predictions.csv.</div>', unsafe_allow_html=True)
 datafile = st.file_uploader("Data file", type=list(ALLOWED_DATA_EXTENSIONS), key="data")
 
 st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
@@ -330,13 +330,13 @@ if run:
                 if lines and lines[-1].startswith("```"):
                     lines = lines[:-1]
                 program_md = "\n".join(lines).strip()
-            bar.progress(45, text="Writing program.md…")
+            bar.progress(35, text="Writing program.md…")
             output_path.write_text(program_md, encoding="utf-8")
-            bar.progress(50, text="program.md saved. Launching deep research…")
+            bar.progress(38, text="program.md saved. Running your training script…")
 
             st.markdown("""
             <div class="resp-success">
-              <div class="resp-success-header">✓ program.md saved — running autoresearch</div>
+              <div class="resp-success-header">✓ program.md saved — executing train.py</div>
             </div>""", unsafe_allow_html=True)
 
             log_box = st.empty()
@@ -348,10 +348,45 @@ if run:
                     del log_lines[: len(log_lines) - 25]
                 log_box.code("\n".join(log_lines), language=None)
 
+            predictions_path = project_root / "predictions.csv"
+            if predictions_path.exists():
+                predictions_path.unlink()
+
+            train_proc = subprocess.Popen(
+                [sys.executable, "train.py"],
+                cwd=str(project_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            assert train_proc.stdout is not None
+            for raw in train_proc.stdout:
+                push_log(raw.rstrip())
+            train_proc.wait()
+
+            if train_proc.returncode != 0:
+                st.markdown(f"""
+                <div class="resp-error">
+                  <div class="resp-error-header">train.py failed (exit {train_proc.returncode})</div>
+                  <div class="resp-body">See log above. Contract: train.py must read data.csv and write predictions.csv with columns target + prediction.</div>
+                </div>""", unsafe_allow_html=True)
+                st.stop()
+
+            if not predictions_path.exists():
+                st.markdown("""
+                <div class="resp-error">
+                  <div class="resp-error-header">train.py ran but produced no predictions.csv</div>
+                  <div class="resp-body">Contract: train.py must write <code>predictions.csv</code> in the project root with columns <code>target</code> and <code>prediction</code> (plus optional numeric feature columns).</div>
+                </div>""", unsafe_allow_html=True)
+                st.stop()
+
+            bar.progress(50, text="Training complete. Launching deep research…")
+
             proc = subprocess.Popen(
                 [
                     sys.executable, "autoresearch.py",
-                    "--data", str(data_path),
+                    "--data", str(predictions_path),
                     "--prompt", prompt.strip(),
                 ],
                 cwd=str(project_root),
