@@ -16,3 +16,5 @@ checkpoints/*.pt
 /predictions.csv
 /program.md
 /uploads/
+/climate_analysis.png
+*.pkl

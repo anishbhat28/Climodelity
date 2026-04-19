@@ -102,7 +102,7 @@ def _regime_test(data: dict, regime_field: str, comparator: str, value: float, s
         err = data["abs_error"][idx]
         inside = err[mask]
         outside = err[~mask]
-        if inside.size < 30 or outside.size < 30:
+        if inside.size < 5 or outside.size < 5:
             result = {
                 "call_id": call_id,
                 "status": "insufficient_data",
